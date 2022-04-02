@@ -36,6 +36,10 @@ module.exports = {
     clover: {
     	url: `https://rpc.clover.finance`,
       accounts: [`0x${PRIVATE_KEY}`],
+    },
+    polygon: {
+    	url: `https://rpc-mumbai.maticvigil.com`,
+    	accounts: [`0x${PRIVATE_KEY}`],
     }
   }
 };
