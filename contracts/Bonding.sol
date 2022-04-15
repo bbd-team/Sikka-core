@@ -13,17 +13,17 @@ import "hardhat/console.sol";
 contract Bonding is Ownable {
     using SafeMath for uint;
     IERC20 amaticb;
-    ISKU skusd;
+    ISKU usp;
     IERC20 public sikka;
 
     struct Info {
-        uint loanAmount;
-        uint borrowAmount;
-        uint interestAmount;
+        uint amountLoan;
+        uint amountBorrow;
+        uint amountInterest;
         uint interestSettle;
     }
 
-    mapping(address => Info) users;
+    mapping(address => Info) public users;
 
     uint constant MAG = 1e18; 
 
@@ -34,36 +34,40 @@ contract Bonding is Ownable {
     uint public loanRate;
     uint public liquidateRate;
     uint public interestRate;
+    uint public borrowRate;
 
     uint public lastUpdateTime;
     uint public interestPerBorrow;
 
     using SafeERC20 for IERC20;
-    event SetValue(uint loanRate, uint liquidateRate);
-    event PreMint(address to, uint amount);
-    event Bond(address user, uint amountInAMATICB, uint amountOutUSD, uint priceAMATICB, uint priceUSD, uint loanRate);
-    event Unbond(address user, uint amountInUSD, uint amountInAMATICB);
-    event PayInterest(address payer, address user, uint amount);
-    event Liquidate(address bondUser, address liquidateUser, uint amountInUSD, uint amountInAMATICB, uint priceAMATICB, uint priceUSD, uint liquidateRate);
-    event Withdraw(uint amount, address to);
+    event SetValue(uint loanRate, uint liquidateRate, uint interestRate, uint borrowRate);
+    event Provide(address from, uint amount);
+    event Borrow(address user, uint amountBorrow);
+    event Repay(address user, uint amountRepay);
+    event Withdraw(address user, uint amount);
+    event PayInterest(address payer, address user, uint amountUSP, uint amountSikka);
+    event Liquidate(address bondUser, address liquidateUser, uint amountLoan, uint amountBorrow, uint liquidateRate);
+    event Claim(uint amount, address to);
 
-    constructor(IERC20 _amaticb, ISKU _skusd, IERC20 _sikka, address _oracle, address _earn) {
+    constructor(IERC20 _amaticb, ISKU _usp, IERC20 _sikka, address _oracle, address _earn) {
         amaticb = _amaticb;
-        skusd = _skusd;
+        usp = _usp;
         oracle = _oracle;
         sikka = _sikka;
         earn = _earn;
     }
 
-    function setRate(uint _loanRate, uint _liquidateRate, uint _interestRate) update(address(0)) external onlyOwner {
+    function setRate(uint _loanRate, uint _liquidateRate, uint _interestRate, uint _borrowRate) update(address(0)) external onlyOwner {
         require(_loanRate > 0 && _loanRate <= 1e18, "INVALID LOAN RATE");
-        require(_liquidateRate > 0 && _liquidateRate <= 1e18 && _liquidateRate >= _loanRate, "INVALID LIQUIDATE RATE");
+        require(_borrowRate > 0 && _borrowRate <= 1e18, "INVALID BORROW RATE");
+        require(_liquidateRate > 0 && _liquidateRate <= 1e18, "INVALID LIQUIDATE RATE");
 
         loanRate = _loanRate;
         liquidateRate = _liquidateRate;
         interestRate = _interestRate;
+        borrowRate = _borrowRate;
 
-        emit SetValue(loanRate, liquidateRate);
+        emit SetValue(loanRate, liquidateRate, interestRate, borrowRate);
     }
 
     function setEarn(address _earn) external onlyOwner {
@@ -80,7 +84,7 @@ contract Bonding is Ownable {
 
         if(userAddr != address(0)) {
             Info storage user = users[msg.sender];
-            user.interestAmount = user.interestAmount.add(interestPerBorrow.sub(user.interestSettle).mul(user.borrowAmount).div(MAG));
+            user.amountInterest = user.amountInterest.add(interestPerBorrow.sub(user.interestSettle).mul(user.amountBorrow).div(MAG));
             user.interestSettle = interestPerBorrow;
         }   
         _;
@@ -99,92 +103,109 @@ contract Bonding is Ownable {
         uint _interestPerBorrow = interestPerBorrow.add(interestAdd.mul(MAG).div(totalBorrow));
 
         uint priceSikka = IOracle(oracle).getPrice("SIKKA");
-        uint priceUSD = IOracle(oracle).getPrice("SKUSD");
-        uint newInterest = _interestPerBorrow.sub(users[userAddr].interestSettle).mul(users[userAddr].borrowAmount).div(MAG);
-        uint interestUSD = users[userAddr].interestAmount.add(newInterest);
-        return interestUSD.mul(priceUSD).div(priceSikka);
+        uint priceUSP = IOracle(oracle).getPrice("USP");
+        uint newInterest = _interestPerBorrow.sub(users[userAddr].interestSettle).mul(users[userAddr].amountBorrow).div(MAG);
+        uint interestUSP = users[userAddr].amountInterest.add(newInterest);
+        return interestUSP.mul(priceUSP).div(priceSikka);
     }
 
-    function bond(uint amountInAMATICB, uint amountSKUSDMin) noPause update(msg.sender) external returns (uint amountOutUSD) {
+    function calculateQuota(address userAddr) view public returns(uint total, uint used) {
         uint priceAMATICB = IOracle(oracle).getPrice("AMATICB");
-        uint priceUSD = IOracle(oracle).getPrice("SKUSD");
+        uint priceUSP = IOracle(oracle).getPrice("USP");
 
-        amaticb.safeTransferFrom(msg.sender, address(this), amountInAMATICB);
-
-        amountOutUSD = amountInAMATICB.mul(priceUSD).div(priceAMATICB).mul(loanRate).div(MAG);
-        require(amountOutUSD > amountSKUSDMin, "INVALID USD AMOUNT");
-
-        Info storage user = users[msg.sender];
-        user.loanAmount = user.loanAmount.add(amountInAMATICB);
-        user.borrowAmount = user.borrowAmount.add(amountOutUSD);
-        totalLoan = totalLoan.add(amountInAMATICB);
-        totalBorrow = totalBorrow.add(amountOutUSD);
-
-        require(amountOutUSD >= amountSKUSDMin, "SLIP");
-
-        skusd.mint(msg.sender, amountOutUSD);
-        emit Bond(msg.sender, amountInAMATICB, amountOutUSD, priceAMATICB, priceUSD, loanRate);
+        Info memory user = users[userAddr];
+        total = user.amountLoan.mul(priceAMATICB).div(priceUSP).mul(loanRate).div(MAG).mul(borrowRate).div(MAG);
+        used = user.amountBorrow;
     }
 
-    function payInterest(address userAddr) private {
+    function borrow(uint amountUSP) noPause update(msg.sender) external {
+        
+        (uint total, uint used) = calculateQuota(msg.sender);
+        require(amountUSP.add(used) <= total, "NO ENOUGH QUOTA TO BORROW");
+
+        Info storage user = users[msg.sender];
+        user.amountBorrow = user.amountBorrow.add(amountUSP);
+        totalBorrow = totalBorrow.add(amountUSP);
+
+        usp.mint(msg.sender, amountUSP);
+        emit Borrow(msg.sender, amountUSP);
+    }
+
+    function payInterest(address userAddr, uint amountUSP) private {
         uint priceSikka = IOracle(oracle).getPrice("SIKKA");
-        uint priceUSD = IOracle(oracle).getPrice("SKUSD");
+        uint priceUSP = IOracle(oracle).getPrice("USP");
 
-        if(users[userAddr].interestAmount > 0) {
-            uint interestSikka = users[userAddr].interestAmount.mul(priceUSD).div(priceSikka);
-            
-            emit PayInterest(msg.sender, userAddr, users[userAddr].interestAmount);
-            users[userAddr].interestAmount = 0;
-            sikka.safeTransferFrom(msg.sender, earn, interestSikka);
-        } 
+        uint amountSikka = amountUSP.mul(priceUSP).div(priceSikka);
+        users[userAddr].amountInterest = users[userAddr].amountInterest.sub(amountUSP);
+        sikka.safeTransferFrom(msg.sender, earn, amountSikka);
+
+        emit PayInterest(msg.sender, userAddr, amountUSP, amountSikka);
     }
 
-    function unbond(uint amountInUSD, uint amountOutAMATICBMin) noPause update(msg.sender) external returns (uint amountOutAMATICB) {
+    function provide(uint amountAMATICB) noPause update(msg.sender) external {
+        amaticb.safeTransferFrom(msg.sender, address(this), amountAMATICB);
+        users[msg.sender].amountLoan = users[msg.sender].amountLoan.add(amountAMATICB);
+        totalLoan = totalLoan.add(amountAMATICB);
+        emit Provide(msg.sender, amountAMATICB);
+    }
+
+    function repay(uint amountUSP) noPause update(msg.sender) external {
         Info storage user = users[msg.sender];
-        require(amountInUSD <= user.borrowAmount, "INVALID UNBOND AMOUNT");
 
-        payInterest(msg.sender);
-
-        amountOutAMATICB = amountInUSD.mul(user.loanAmount).div(user.borrowAmount);
-        user.borrowAmount = user.borrowAmount.sub(amountInUSD);
-        user.loanAmount = user.loanAmount.sub(amountOutAMATICB);
-
-        totalLoan = totalLoan.sub(amountOutAMATICB);
-        totalBorrow = totalBorrow.sub(amountInUSD);
-
-        require(amountOutAMATICB >= amountOutAMATICBMin, "SLIP");
-
-        skusd.burn(msg.sender, amountInUSD);
-        amaticb.safeTransfer(msg.sender, amountOutAMATICB);
-        emit Unbond(msg.sender, amountInUSD, amountOutAMATICB);
+        require(amountUSP > 0 && amountUSP <= user.amountBorrow, "INVALID REPAY AMOUNT");
+        if(user.amountInterest > 0) {
+            payInterest(msg.sender, amountUSP.mul(user.amountInterest).div(user.amountBorrow));
+        }
+        
+        totalBorrow = totalBorrow.sub(amountUSP);
+        user.amountBorrow = user.amountBorrow.sub(amountUSP);
+        usp.burn(msg.sender, amountUSP);
+        
+        emit Repay(msg.sender, amountUSP);
     }
 
-    function liquidate(address userAddr, uint amountInUSD, uint amountOutAMATICBMin) noPause update(userAddr)  external returns (uint amountOutAMATICB) {
+    function withdraw(uint amountAMATICB) noPause update(msg.sender) external {
+        uint priceAMATICB = IOracle(oracle).getPrice("AMATICB");
+        uint priceUSP = IOracle(oracle).getPrice("USP");
+
+        Info storage user = users[msg.sender];
+        uint lockedAmaticB = user.amountBorrow.mul(priceUSP).div(priceAMATICB).mul(MAG).div(loanRate);
+        require(user.amountLoan >= lockedAmaticB.add(amountAMATICB), "NO ENOUGH TOKEN TO WITHDRAW");
+
+        totalLoan = totalLoan.sub(amountAMATICB);
+        user.amountLoan = user.amountLoan.sub(amountAMATICB);
+        amaticb.safeTransfer(msg.sender, amountAMATICB);
+
+        emit Withdraw(msg.sender, amountAMATICB);
+    }
+
+
+    function liquidate(address userAddr) noPause update(userAddr) external {
         Info storage user = users[userAddr];
         uint priceAMATICB = IOracle(oracle).getPrice("AMATICB");
-        uint priceUSD = IOracle(oracle).getPrice("SKUSD");
+        uint priceUSP = IOracle(oracle).getPrice("USP");
 
-        uint valueLoan = user.loanAmount.mul(priceAMATICB).div(MAG);
-        uint valueBorrow = user.borrowAmount.mul(priceUSD).div(MAG).add(user.interestAmount);
-        require(valueLoan.mul(liquidateRate).div(MAG) <= valueBorrow, "CAN NOT LIQUIDATE NOW");
+        uint valueLoan = user.amountLoan.mul(priceAMATICB).div(MAG);
+        uint valueBorrow = user.amountBorrow.mul(priceUSP).div(MAG).add(user.amountInterest);
+        require(valueLoan <= valueBorrow.mul(MAG.add(liquidateRate)).div(MAG), "CAN NOT LIQUIDATE NOW");
 
-        payInterest(userAddr);
+        payInterest(userAddr, user.amountInterest);
+        uint amountBorrow = user.amountBorrow;
+        uint amountLoan = user.amountLoan;
 
-        amountOutAMATICB = amountInUSD.mul(user.loanAmount).div(user.borrowAmount);
-        user.borrowAmount = user.borrowAmount.sub(amountInUSD);
-        user.loanAmount = user.loanAmount.sub(amountOutAMATICB);
+        user.amountBorrow = 0;
+        user.amountLoan = 0;
 
-        require(amountOutAMATICB >= amountOutAMATICBMin, "SLIP");
-
-        skusd.burn(msg.sender, amountInUSD);
-        amaticb.safeTransfer(msg.sender, amountOutAMATICB);
-        emit Liquidate(userAddr, msg.sender, amountInUSD, amountOutAMATICB, priceAMATICB, priceUSD, liquidateRate);
+        usp.burn(msg.sender, amountBorrow);
+        amaticb.safeTransfer(msg.sender, amountLoan);
+        
+        emit Liquidate(userAddr, msg.sender, amountLoan, amountBorrow, liquidateRate);
     }
 
-    function withdraw(uint amount, address to) onlyOwner external {
+    function claim(uint amount, address to) onlyOwner external {
         require(amaticb.balanceOf(address(this)) >= amount.add(totalLoan), "NOT ENOUGH TOKEN");
         amaticb.safeTransfer(msg.sender, amount);
 
-        emit Withdraw(amount, to);
+        emit Claim(amount, to);
     }
 }

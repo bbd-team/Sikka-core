@@ -1,6 +1,6 @@
 require("@nomiclabs/hardhat-waffle");
 
-const PRIVATE_KEY = "aeea8cb8e50f141ac7bdcfa985c2d28958463799d90014f937cbec6f2e53ebda";
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
 // This is a sample Hardhat task. To learn how to create your own go to
 // https://hardhat.org/guides/create-task.html

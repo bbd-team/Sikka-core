@@ -71,7 +71,7 @@ contract aBNBb is OwnableUpgradeable, ERC20Upgradeable, IInternetBond {
 
     function initialize(address operator) public initializer {
         __Ownable_init();
-        __ERC20_init("Ankr BNB Reward Earning Bond", "aBNBb");
+        __ERC20_init("Ankr BNB Reward Earning Bond", "aMATICb");
         _operator = operator;
         _ratio = 1e18;
     }
