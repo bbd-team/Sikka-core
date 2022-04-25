@@ -12,8 +12,8 @@ import "hardhat/console.sol";
 
 contract Bonding is Ownable {
     using SafeMath for uint;
-    IERC20 amaticb;
-    ISKU usp;
+    IERC20 public amaticb;
+    address public usp;
     IERC20 public sikka;
 
     struct Info {
@@ -38,18 +38,19 @@ contract Bonding is Ownable {
 
     uint public lastUpdateTime;
     uint public interestPerBorrow;
+    uint public payBackRate;
 
     using SafeERC20 for IERC20;
-    event SetValue(uint loanRate, uint liquidateRate, uint interestRate, uint borrowRate);
+    event SetValue(uint loanRate, uint liquidateRate, uint interestRate, uint borrowRate, uint payBackRate);
     event Provide(address from, uint amount);
     event Borrow(address user, uint amountBorrow);
     event Repay(address user, uint amountRepay);
     event Withdraw(address user, uint amount);
-    event PayInterest(address payer, address user, uint amountUSP, uint amountSikka);
+    event PayInterest(address payer, address user, uint amountUSP, uint amountPayBackSikka);
     event Liquidate(address bondUser, address liquidateUser, uint amountLoan, uint amountBorrow, uint liquidateRate);
     event Claim(uint amount, address to);
 
-    constructor(IERC20 _amaticb, ISKU _usp, IERC20 _sikka, address _oracle, address _earn) {
+    constructor(IERC20 _amaticb, address _usp, IERC20 _sikka, address _oracle, address _earn) {
         amaticb = _amaticb;
         usp = _usp;
         oracle = _oracle;
@@ -57,17 +58,19 @@ contract Bonding is Ownable {
         earn = _earn;
     }
 
-    function setRate(uint _loanRate, uint _liquidateRate, uint _interestRate, uint _borrowRate) update(address(0)) external onlyOwner {
+    function setRate(uint _loanRate, uint _liquidateRate, uint _interestRate, uint _borrowRate, uint _payBackRate) update(address(0)) external onlyOwner {
         require(_loanRate > 0 && _loanRate <= 1e18, "INVALID LOAN RATE");
         require(_borrowRate > 0 && _borrowRate <= 1e18, "INVALID BORROW RATE");
         require(_liquidateRate > 0 && _liquidateRate <= 1e18, "INVALID LIQUIDATE RATE");
+        require(_payBackRate > 0, "INVALID PAY BACK RATE");
 
         loanRate = _loanRate;
         liquidateRate = _liquidateRate;
         interestRate = _interestRate;
         borrowRate = _borrowRate;
+        payBackRate = _payBackRate;
 
-        emit SetValue(loanRate, liquidateRate, interestRate, borrowRate);
+        emit SetValue(loanRate, liquidateRate, interestRate, borrowRate, payBackRate);
     }
 
     function setEarn(address _earn) external onlyOwner {
@@ -102,11 +105,9 @@ contract Bonding is Ownable {
         uint interestAdd = interestRate.mul(totalBorrow).mul(block.number.sub(lastUpdateTime)).div(MAG);
         uint _interestPerBorrow = interestPerBorrow.add(interestAdd.mul(MAG).div(totalBorrow));
 
-        uint priceSikka = IOracle(oracle).getPrice("SIKKA");
-        uint priceUSP = IOracle(oracle).getPrice("USP");
         uint newInterest = _interestPerBorrow.sub(users[userAddr].interestSettle).mul(users[userAddr].amountBorrow).div(MAG);
         uint interestUSP = users[userAddr].amountInterest.add(newInterest);
-        return interestUSP.mul(priceUSP).div(priceSikka);
+        return interestUSP;
     }
 
     function calculateQuota(address userAddr) view public returns(uint total, uint used) {
@@ -119,7 +120,6 @@ contract Bonding is Ownable {
     }
 
     function borrow(uint amountUSP) noPause update(msg.sender) external {
-        
         (uint total, uint used) = calculateQuota(msg.sender);
         require(amountUSP.add(used) <= total, "NO ENOUGH QUOTA TO BORROW");
 
@@ -127,19 +127,21 @@ contract Bonding is Ownable {
         user.amountBorrow = user.amountBorrow.add(amountUSP);
         totalBorrow = totalBorrow.add(amountUSP);
 
-        usp.mint(msg.sender, amountUSP);
+        ISKU(usp).mint(msg.sender, amountUSP);
         emit Borrow(msg.sender, amountUSP);
     }
 
     function payInterest(address userAddr, uint amountUSP) private {
         uint priceSikka = IOracle(oracle).getPrice("SIKKA");
         uint priceUSP = IOracle(oracle).getPrice("USP");
-
-        uint amountSikka = amountUSP.mul(priceUSP).div(priceSikka);
         users[userAddr].amountInterest = users[userAddr].amountInterest.sub(amountUSP);
-        sikka.safeTransferFrom(msg.sender, earn, amountSikka);
+        IERC20(usp).safeTransferFrom(msg.sender, earn, amountUSP);
 
-        emit PayInterest(msg.sender, userAddr, amountUSP, amountSikka);
+        uint paybackSikka = amountUSP.mul(priceUSP).div(priceSikka).mul(payBackRate).div(MAG);
+        require(sikka.balanceOf(address(this)) >= paybackSikka, "NO ENOUGH PAYBACK SIKKA");
+        sikka.safeTransfer(userAddr, paybackSikka);
+
+        emit PayInterest(msg.sender, userAddr, amountUSP, paybackSikka);
     }
 
     function provide(uint amountAMATICB) noPause update(msg.sender) external {
@@ -159,7 +161,7 @@ contract Bonding is Ownable {
         
         totalBorrow = totalBorrow.sub(amountUSP);
         user.amountBorrow = user.amountBorrow.sub(amountUSP);
-        usp.burn(msg.sender, amountUSP);
+        ISKU(usp).burn(msg.sender, amountUSP);
         
         emit Repay(msg.sender, amountUSP);
     }
@@ -185,20 +187,33 @@ contract Bonding is Ownable {
         uint priceAMATICB = IOracle(oracle).getPrice("AMATICB");
         uint priceUSP = IOracle(oracle).getPrice("USP");
 
-        uint valueLoan = user.amountLoan.mul(priceAMATICB).div(MAG);
-        uint valueBorrow = user.amountBorrow.mul(priceUSP).div(MAG).add(user.amountInterest);
-        require(valueLoan <= valueBorrow.mul(MAG.add(liquidateRate)).div(MAG), "CAN NOT LIQUIDATE NOW");
+        uint valueLoan = user.amountLoan.mul(priceAMATICB).div(priceUSP);
+        uint valueBorrow = user.amountBorrow.add(user.amountInterest);
+        require(valueLoan.mul(loanRate).div(MAG).mul(borrowRate).div(MAG) <= valueBorrow, "CAN NOT LIQUIDATE NOW");
 
-        payInterest(userAddr, user.amountInterest);
         uint amountBorrow = user.amountBorrow;
         uint amountLoan = user.amountLoan;
+        uint amountInterest = user.amountInterest;
 
         user.amountBorrow = 0;
         user.amountLoan = 0;
+        user.amountInterest = 0;
 
-        usp.burn(msg.sender, amountBorrow);
-        amaticb.safeTransfer(msg.sender, amountLoan);
+        uint valueProfit = valueLoan.mul(liquidateRate).div(MAG);
+        IERC20(usp).safeTransferFrom(msg.sender, address(this), valueLoan.sub(valueProfit));
+        ISKU(usp).burn(address(this), amountBorrow);
+
+        uint balance = IERC20(usp).balanceOf(address(this));
+        if(balance > amountInterest) 
+            IERC20(usp).safeTransfer(earn, amountInterest);
+        else 
+            IERC20(usp).safeTransfer(earn, balance);
         
+        balance = IERC20(usp).balanceOf(address(this));
+        if(balance > 0)
+            IERC20(usp).safeTransfer(userAddr, balance);
+        
+        amaticb.safeTransfer(msg.sender, amountLoan);
         emit Liquidate(userAddr, msg.sender, amountLoan, amountBorrow, liquidateRate);
     }
 

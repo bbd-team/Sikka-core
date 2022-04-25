@@ -51,26 +51,32 @@ async function main() {
 
       console.log("mint");
       await (await amaticb.mint(owner, toTokenAmount(1000000))).wait();
-      await (await sikka.mint(owner, toTokenAmount(1000000))).wait();
-      await (await bonding.setRate(toTokenAmount(0.5), toTokenAmount(0.15), "3805175038", toTokenAmount(0.95))).wait();
+      await (await sikka.mint(owner, toTokenAmount(100000000))).wait();
+      await (await bonding.setRate(toTokenAmount(0.5), toTokenAmount(0.15), "3805175038", toTokenAmount(0.85), toTokenAmount(0.5))).wait();
       await (await oracle.setPrice(["AMATICB", "USP", "SIKKA"], [toTokenAmount(10), toTokenAmount(1), toTokenAmount(1)]));
 
 
    console.log(`earn:${earn.address}\namaticb:${amaticb.address}\nsikka:${sikka.address}\nskusd:${usp.address}\noracle:${oracle.address}\nbonding:${bonding.address}`)
-   await transfer();
+
+   await earn.setRewardPerBlock(63419583967, 3153600);
+   await (await usp.addPermission(owner)).wait();
+   await (await usp.mint(owner, toTokenAmount(20000000))).wait();
+   await (await usp.transfer(earn.address, toTokenAmount(10000000))).wait();
+   await (await sikka.transfer(bonding.address, toTokenAmount(1000000))).wait();
    console.log("complete");
 
-   await earn.setRewardPerBlock(6341958396);
-   await (await usp.addPermission(owner)).wait();
-   await (await usp.mint(owner, toTokenAmount(10000000))).wait();
-   await (await usp.transfer(earn.address, toTokenAmount(10000000))).wait();
+   await transfer();
+   console.log("transfer");
+
+   
 }
 
 async function transfer() {
   for(let wallet of walletList) {
       await (await amaticb.transfer(wallet, toTokenAmount("10000"))).wait();
-      await (await sikka.transfer(wallet, toTokenAmount("10000"))).wait();
-      console.log("transfer", wallet);
+      console.log("transfer", wallet, "amaticb");
+      await (await usp.transfer(wallet, toTokenAmount("10000"))).wait();
+      console.log("transfer", wallet, "usp");
   }
 }
 

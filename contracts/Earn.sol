@@ -30,11 +30,12 @@ contract Earn is Ownable {
 	uint public lastUpdate;
 	ERC20 public usp;
 	uint public totalStake;
-	uint public price = 1e18;
+	uint public basePrice = 1e18;
 	bool public staked = false;
 
 	uint constant MAG = 1e18;
 	using SafeERC20 for ERC20;
+	uint compoundTime;
 
 	event SetRewardPerBlock(uint rewardPerBlock);
 	event Stake(uint amountInUSP, uint amountOutAUSP);
@@ -47,34 +48,56 @@ contract Earn is Ownable {
 
 	modifier update() {
 		if(staked) {
-			uint addPrice = price.mul(block.number.sub(lastUpdate)).mul(rewardPerBlock).div(MAG);
-			price = price.add(addPrice);
+			while(block.number > lastUpdate.add(compoundTime)) {
+				uint addPrice = basePrice.mul(compoundTime).mul(rewardPerBlock).div(MAG);
+				basePrice = basePrice.add(addPrice);
+				lastUpdate = lastUpdate.add(compoundTime);
+			}
 		}
 
-		lastUpdate = block.number;
 		_;
 	}
 
-	function currentPrice() view external returns(uint){
-		uint addPrice = price.mul(block.number.sub(lastUpdate)).mul(rewardPerBlock).div(MAG);
-		return price.add(addPrice);
+	function currentPrice() view public returns(uint) {
+		require(rewardPerBlock > 0, "Reward Not Set");
+		if (!staked) {
+			return basePrice;
+		}
+
+		uint newPrice = basePrice;
+		uint newUpdate = lastUpdate;
+		while(block.number > newUpdate.add(compoundTime)) {
+			uint addPrice = basePrice.mul(compoundTime).mul(rewardPerBlock).div(MAG);
+			newPrice = newPrice.add(addPrice);
+			newUpdate = newUpdate.add(compoundTime);
+		}
+
+		uint addPrice = newPrice.mul(block.number.sub(newUpdate)).mul(rewardPerBlock).div(MAG);
+		return newPrice.add(addPrice);
 	}
 
-	function setRewardPerBlock(uint _rewardPerBlock) update external onlyOwner {
+	function setRewardPerBlock(uint _rewardPerBlock, uint _comoundTime) update external onlyOwner {
 		rewardPerBlock = _rewardPerBlock;
+		compoundTime = _comoundTime;
 		emit SetRewardPerBlock(_rewardPerBlock);
 	}
 
 	function stake(uint amountInUSP) update external returns (uint amountOutAUSP) {
+		uint price = currentPrice();
 		usp.safeTransferFrom(msg.sender, address(this), amountInUSP);
 		amountOutAUSP = amountInUSP.mul(MAG).div(price);
 		ausp.mint(msg.sender, amountOutAUSP);
-		staked = true;
+
+		if(!staked) {
+			lastUpdate = block.number;
+			staked = true;
+		}
 
 		emit Stake(amountInUSP, amountOutAUSP);
 	}
  
 	function withdraw(uint amountInAUSP) update external returns (uint amountOutUSP) {
+		uint price = currentPrice();
 		ausp.burn(msg.sender, amountInAUSP);
 		uint totalSupply = ausp.totalSupply();
 		amountOutUSP = amountInAUSP.mul(price).div(MAG);
@@ -86,6 +109,7 @@ contract Earn is Ownable {
 	}
 
 	function take(uint amount) external onlyOwner {
+		uint price = currentPrice();
 		uint totalSupply = ausp.totalSupply();
 		usp.safeTransfer(msg.sender, amount);
 		require(totalSupply.mul(price).div(MAG) <= usp.balanceOf(address(this)));

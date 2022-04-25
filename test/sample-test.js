@@ -37,17 +37,19 @@ describe("Bond", function () {
 
       await (await amaticb.mint(user1.address, toTokenAmount(1000000))).wait();
       await (await sikka.mint(user1.address, toTokenAmount(1000000))).wait();
-      await (await bonding.setRate(toTokenAmount(0.5), toTokenAmount(0.15), toTokenAmount(0.1), toTokenAmount(0.95))).wait();
-      await (await oracle.setPrice(["AMATICB", "USP", "SIKKA"], [toTokenAmount(10), toTokenAmount(1), toTokenAmount(1)]));
+      await (await bonding.setRate(toTokenAmount(0.5), toTokenAmount(0.15), toTokenAmount(0.05), toTokenAmount(0.75), toTokenAmount(0.5))).wait();
+      await (await oracle.setPrice(["AMATICB", "USP", "SIKKA"], [toTokenAmount(20), toTokenAmount(1), toTokenAmount(1)]));
 
       await amaticb.connect(user1).approve(bonding.address, toTokenAmount(10000000000));
       await sikka.connect(user1).approve(bonding.address, toTokenAmount(10000000000));
       await usp.connect(user1).approve(earn.address, toTokenAmount(10000000000));
+      await usp.connect(user1).approve(bonding.address, toTokenAmount(10000000000));
 
       await (await usp.addPermission(developer.address)).wait();
-      await (await usp.mint(user1.address, toTokenAmount(10000000))).wait();
-      await earn.setRewardPerBlock(toTokenAmount(0.1));
+      await (await usp.mint(user1.address, toTokenAmount(20000000))).wait();
+      await earn.setRewardPerBlock(toTokenAmount(0.1), 2);
       await (await usp.connect(user1).transfer(earn.address, toTokenAmount(10000000))).wait();
+      await (await sikka.connect(user1).transfer(bonding.address, toTokenAmount(1000))).wait();
   });
 
   async function logBalance(wallet) {
@@ -62,8 +64,10 @@ describe("Bond", function () {
       console.log(`quota ${toMathAmount(quota[0])} ${toMathAmount(quota[1])}`)
 
 
-       let fee = await sikka.balanceOf(feeTo.address);
+       let fee = await usp.balanceOf(feeTo.address);
       console.log(`feeTo ${toMathAmount(fee)}`)
+
+
 
       // console.log(`delta ${await bonding.delta()}`);
       console.log(`amaticb: ${toMathAmount(amaticbBalance)} usd: ${toMathAmount(usdBalance)}`);
@@ -76,27 +80,47 @@ describe("Bond", function () {
       let auspBalance = await ausp.balanceOf(user1.address);
       console.log(`balance ${toMathAmount(uspBalance)} ${toMathAmount(auspBalance)}`)
 
-      let price = await earn.price()
+      let price = await earn.currentPrice()
       console.log(`price ${toMathAmount(price)}`)
   }
 
-  it("simple bond", async function () {
+  // it("simple bond", async function () {
+  //       await logBalance(user1);
+
+  //       console.log("provide");
+  //       await bonding.connect(user1).provide(toTokenAmount(30));
+  //       await logBalance(user1);
+
+  //       console.log("borrow");
+  //       await bonding.connect(user1).borrow(toTokenAmount(100));
+  //       await logBalance(user1);
+
+  //       console.log("repay");
+  //       await bonding.connect(user1).repay(toTokenAmount(50));
+  //       await logBalance(user1);
+
+  //       console.log("withdraw");
+  //       await bonding.connect(user1).withdraw(toTokenAmount(20));
+  //       await logBalance(user1);
+  //  });
+
+  it("simple liquidate", async function () {
         await logBalance(user1);
 
         console.log("provide");
-        await bonding.connect(user1).provide(toTokenAmount(30));
+        await bonding.connect(user1).provide(toTokenAmount(10));
         await logBalance(user1);
 
         console.log("borrow");
-        await bonding.connect(user1).borrow(toTokenAmount(100));
+        await bonding.connect(user1).borrow(toTokenAmount(65));
         await logBalance(user1);
 
-        console.log("repay");
-        await bonding.connect(user1).repay(toTokenAmount(50));
+        console.log("changePrice");
+        await (await oracle.setPrice(["AMATICB"], [toTokenAmount(18.9)]));
         await logBalance(user1);
 
-        console.log("withdraw");
-        await bonding.connect(user1).withdraw(toTokenAmount(20));
+        console.log("liquidate");
+        await bonding.connect(user1).liquidate(user1.address);
         await logBalance(user1);
    });
 
@@ -109,6 +133,18 @@ describe("Bond", function () {
 
         await logEarnInfo()
         await earn.connect(user1).stake(toTokenAmount(10));
+
+        await logEarnInfo()
+        await earn.connect(user1).withdraw(toTokenAmount(5))
+
+        await logEarnInfo()
+        await earn.connect(user1).withdraw(toTokenAmount(5))
+
+        await logEarnInfo()
+        await earn.connect(user1).stake(toTokenAmount(5))
+
+        await logEarnInfo()
+        await earn.connect(user1).withdraw(toTokenAmount(5))
 
         await logEarnInfo()
    });
