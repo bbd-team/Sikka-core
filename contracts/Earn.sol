@@ -29,17 +29,17 @@ contract Earn is Ownable {
 	uint public rewardPerBlock;
 	uint public lastUpdate;
 	ERC20 public usp;
-	uint public totalStake;
 	uint public basePrice = 1e18;
 	bool public staked = false;
 
 	uint constant MAG = 1e18;
 	using SafeERC20 for ERC20;
-	uint compoundTime;
+	uint public compoundTime;
 
 	event SetRewardPerBlock(uint rewardPerBlock);
-	event Stake(uint amountInUSP, uint amountOutAUSP);
-	event Withdraw(uint amountInAUSP, uint amountOutUSP);
+	event Stake(address user, uint amountInUSP, uint amountOutAUSP);
+	event Withdraw(address user, uint amountInAUSP, uint amountOutUSP);
+	event Take(uint amount, address to);
 
 	constructor(ERC20 _usp) {
 		ausp = new AUSP("AUSP", "AUSP");
@@ -66,13 +66,14 @@ contract Earn is Ownable {
 
 		uint newPrice = basePrice;
 		uint newUpdate = lastUpdate;
+		uint addPrice;
 		while(block.number > newUpdate.add(compoundTime)) {
-			uint addPrice = basePrice.mul(compoundTime).mul(rewardPerBlock).div(MAG);
+			addPrice = basePrice.mul(compoundTime).mul(rewardPerBlock).div(MAG);
 			newPrice = newPrice.add(addPrice);
 			newUpdate = newUpdate.add(compoundTime);
 		}
 
-		uint addPrice = newPrice.mul(block.number.sub(newUpdate)).mul(rewardPerBlock).div(MAG);
+		addPrice = newPrice.mul(block.number.sub(newUpdate)).mul(rewardPerBlock).div(MAG);
 		return newPrice.add(addPrice);
 	}
 
@@ -93,7 +94,7 @@ contract Earn is Ownable {
 			staked = true;
 		}
 
-		emit Stake(amountInUSP, amountOutAUSP);
+		emit Stake(msg.sender, amountInUSP, amountOutAUSP);
 	}
  
 	function withdraw(uint amountInAUSP) update external returns (uint amountOutUSP) {
@@ -105,13 +106,14 @@ contract Earn is Ownable {
 		usp.safeTransfer(msg.sender, amountOutUSP);
 		require(totalSupply.mul(price).div(MAG) <= usp.balanceOf(address(this)), "NO ENOUGH REWARD");
 
-		emit Withdraw(amountInAUSP, amountOutUSP);
+		emit Withdraw(msg.sender, amountInAUSP, amountOutUSP);
 	}
 
-	function take(uint amount) external onlyOwner {
+	function take(uint amount, address to) external onlyOwner {
 		uint price = currentPrice();
 		uint totalSupply = ausp.totalSupply();
 		usp.safeTransfer(msg.sender, amount);
 		require(totalSupply.mul(price).div(MAG) <= usp.balanceOf(address(this)));
+		emit Take(amount, to);
 	}
 }
