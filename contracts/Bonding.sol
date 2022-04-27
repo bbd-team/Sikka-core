@@ -171,7 +171,8 @@ contract Bonding is Ownable {
         uint priceUSP = IOracle(oracle).getPrice("USP");
 
         Info storage user = users[msg.sender];
-        uint lockedAmaticB = user.amountBorrow.mul(priceUSP).div(priceAMATICB).mul(MAG).div(loanRate);
+        (uint total, uint used) = calculateQuota(msg.sender);
+        uint lockedAmaticB = total.sub(used).mul(priceUSP).div(priceAMATICB);
         require(user.amountLoan >= lockedAmaticB.add(amountAMATICB), "NO ENOUGH TOKEN TO WITHDRAW");
 
         totalLoan = totalLoan.sub(amountAMATICB);
