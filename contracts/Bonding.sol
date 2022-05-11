@@ -79,14 +79,13 @@ contract Bonding is Ownable {
 
     modifier update(address userAddr) {
         if(totalBorrow > 0) {
-            uint interestAdd = interestRate.mul(totalBorrow).mul(block.number.sub(lastUpdateTime)).div(MAG);
-            interestPerBorrow = interestPerBorrow.add(interestAdd.mul(MAG).div(totalBorrow));
+            interestPerBorrow = interestPerBorrow.add(interestRate.mul(block.number.sub(lastUpdateTime)));
         }
 
         lastUpdateTime = block.number;
 
         if(userAddr != address(0)) {
-            Info storage user = users[msg.sender];
+            Info storage user = users[userAddr];
             user.amountInterest = user.amountInterest.add(interestPerBorrow.sub(user.interestSettle).mul(user.amountBorrow).div(MAG));
             user.interestSettle = interestPerBorrow;
         }   
@@ -102,8 +101,7 @@ contract Bonding is Ownable {
         if(totalBorrow == 0) {
             return 0;
         }
-        uint interestAdd = interestRate.mul(totalBorrow).mul(block.number.sub(lastUpdateTime)).div(MAG);
-        uint _interestPerBorrow = interestPerBorrow.add(interestAdd.mul(MAG).div(totalBorrow));
+        uint _interestPerBorrow = interestPerBorrow.add(interestRate.mul(block.number.sub(lastUpdateTime)));
 
         uint newInterest = _interestPerBorrow.sub(users[userAddr].interestSettle).mul(users[userAddr].amountBorrow).div(MAG);
         uint interestUSP = users[userAddr].amountInterest.add(newInterest);
