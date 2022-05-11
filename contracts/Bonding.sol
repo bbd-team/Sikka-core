@@ -218,7 +218,7 @@ contract Bonding is Ownable {
 
     function claim(uint amount, address to) onlyOwner external {
         require(amaticb.balanceOf(address(this)) >= amount.add(totalLoan), "NOT ENOUGH TOKEN");
-        amaticb.safeTransfer(msg.sender, amount);
+        amaticb.safeTransfer(to, amount);
 
         emit Claim(amount, to);
     }
