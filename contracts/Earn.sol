@@ -112,7 +112,7 @@ contract Earn is Ownable {
 	function take(uint amount, address to) external onlyOwner {
 		uint price = currentPrice();
 		uint totalSupply = ausp.totalSupply();
-		usp.safeTransfer(msg.sender, amount);
+		usp.safeTransfer(to, amount);
 		require(totalSupply.mul(price).div(MAG) <= usp.balanceOf(address(this)));
 		emit Take(amount, to);
 	}
