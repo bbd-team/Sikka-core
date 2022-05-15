@@ -5,12 +5,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 import "./interfaces/ISKU.sol";
 import "./interfaces/IOracle.sol";
 import "hardhat/console.sol";
 
-contract Bonding is Ownable {
+contract Bonding is Ownable, ReentrancyGuard {
     using SafeMath for uint;
     IERC20 public amaticb;
     address public usp;
@@ -42,6 +43,7 @@ contract Bonding is Ownable {
 
     using SafeERC20 for IERC20;
     event SetValue(uint loanRate, uint liquidateRate, uint interestRate, uint borrowRate, uint payBackRate);
+    event SetOracle(address from, uint amount);
     event Provide(address from, uint amount);
     event Borrow(address user, uint amountBorrow);
     event Repay(address user, uint amountRepay);
@@ -56,6 +58,10 @@ contract Bonding is Ownable {
         oracle = _oracle;
         sikka = _sikka;
         earn = _earn;
+    }
+
+    function setOracle(address _oracle) onlyOwner external {
+        oracle = _oracle;
     }
 
     function setRate(uint _loanRate, uint _liquidateRate, uint _interestRate, uint _borrowRate, uint _payBackRate) update(address(0)) external onlyOwner {
@@ -117,7 +123,7 @@ contract Bonding is Ownable {
         used = user.amountBorrow;
     }
 
-    function borrow(uint amountUSP) noPause update(msg.sender) external {
+    function borrow(uint amountUSP) nonReentrant noPause update(msg.sender) external {
         (uint total, uint used) = calculateQuota(msg.sender);
         require(amountUSP.add(used) <= total, "NO ENOUGH QUOTA TO BORROW");
 
@@ -142,14 +148,14 @@ contract Bonding is Ownable {
         emit PayInterest(msg.sender, userAddr, amountUSP, paybackSikka);
     }
 
-    function provide(uint amountAMATICB) noPause update(msg.sender) external {
+    function provide(uint amountAMATICB) nonReentrant noPause update(msg.sender) external {
         amaticb.safeTransferFrom(msg.sender, address(this), amountAMATICB);
         users[msg.sender].amountLoan = users[msg.sender].amountLoan.add(amountAMATICB);
         totalLoan = totalLoan.add(amountAMATICB);
         emit Provide(msg.sender, amountAMATICB);
     }
 
-    function repay(uint amountUSP) noPause update(msg.sender) external {
+    function repay(uint amountUSP) nonReentrant noPause update(msg.sender) external {
         Info storage user = users[msg.sender];
 
         require(amountUSP > 0 && amountUSP <= user.amountBorrow, "INVALID REPAY AMOUNT");
@@ -164,7 +170,7 @@ contract Bonding is Ownable {
         emit Repay(msg.sender, amountUSP);
     }
 
-    function withdraw(uint amountAMATICB) noPause update(msg.sender) external {
+    function withdraw(uint amountAMATICB) nonReentrant noPause update(msg.sender) external {
         uint priceAMATICB = IOracle(oracle).getPrice("AMATICB");
         uint priceUSP = IOracle(oracle).getPrice("USP");
 
@@ -181,7 +187,7 @@ contract Bonding is Ownable {
     }
 
 
-    function liquidate(address userAddr) noPause update(userAddr) external {
+    function liquidate(address userAddr) nonReentrant noPause update(userAddr) external {
         Info storage user = users[userAddr];
         uint priceAMATICB = IOracle(oracle).getPrice("AMATICB");
         uint priceUSP = IOracle(oracle).getPrice("USP");

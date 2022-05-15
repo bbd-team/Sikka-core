@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 import "./base/Permission.sol";
 import "hardhat/console.sol";
@@ -23,7 +24,7 @@ contract AUSP is ERC20, Ownable {
 	}
 }
 
-contract Earn is Ownable {
+contract Earn is Ownable, ReentrancyGuard {
 	using SafeMath for uint;
 	AUSP public ausp;
 	uint public rewardPerBlock;
@@ -83,7 +84,7 @@ contract Earn is Ownable {
 		emit SetRewardPerBlock(_rewardPerBlock);
 	}
 
-	function stake(uint amountInUSP) update external returns (uint amountOutAUSP) {
+	function stake(uint amountInUSP) nonReentrant update external returns (uint amountOutAUSP) {
 		uint price = currentPrice();
 		usp.safeTransferFrom(msg.sender, address(this), amountInUSP);
 		amountOutAUSP = amountInUSP.mul(MAG).div(price);
@@ -97,7 +98,7 @@ contract Earn is Ownable {
 		emit Stake(msg.sender, amountInUSP, amountOutAUSP);
 	}
  
-	function withdraw(uint amountInAUSP) update external returns (uint amountOutUSP) {
+	function withdraw(uint amountInAUSP) nonReentrant update external returns (uint amountOutUSP) {
 		uint price = currentPrice();
 		ausp.burn(msg.sender, amountInAUSP);
 		uint totalSupply = ausp.totalSupply();
