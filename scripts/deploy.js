@@ -50,19 +50,20 @@ async function main() {
       await (await usp.addPermission(bonding.address)).wait();
 
       console.log("mint");
-      await (await amaticb.mint(owner, toTokenAmount(1000000))).wait();
-      await (await sikka.mint(owner, toTokenAmount(100000000))).wait();
-      await (await bonding.setRate(toTokenAmount(0.5), toTokenAmount(0.15), 31709791983, toTokenAmount(0.85), toTokenAmount(0.5))).wait();
+   await (await amaticb.mint(owner, toTokenAmount(1000000))).wait(); //premint amaticb, only use in testnet
+   await (await sikka.mint(owner, toTokenAmount(100000000))).wait(); //premint sikka for payback borrow interest
+   await (await bonding.setRate(toTokenAmount(0.5), toTokenAmount(0.15), 31709791983, toTokenAmount(0.85), toTokenAmount(0.5))).wait();
+   //set loan rate(precision 1e18), liquidate rate(precision 1e18), interestRate(block unit), borrow limit(precision 1e18), payback sikka rate(precision 1e18)
    await (await oracle.setPrice(["AMATICB", "USP", "SIKKA"], [toTokenAmount(10), toTokenAmount(1), toTokenAmount(1)]));
+   //set oracle price, only use in testnet, replace by script in mainnet
    let ausp = await earn.ausp();
-
    console.log(`earn:${earn.address}\namaticb:${amaticb.address}\nsikka:${sikka.address}\nskusd:${usp.address}\noracle:${oracle.address}\nbonding:${bonding.address}\nausp:${ausp}`)
 
-   await earn.setRewardPerBlock(63419583967, 3153600);
-   await (await usp.addPermission(owner)).wait();
+   await earn.setRewardPerBlock(63419583967, 3153600); //set rewardPerBlock, compoundTime(block count of 1 year)
+   await (await usp.addPermission(owner)).wait();//premint usp, only use in testnet
    await (await usp.mint(owner, toTokenAmount(20000000))).wait();
-   await (await usp.transfer(earn.address, toTokenAmount(10000000))).wait();
-   await (await sikka.transfer(bonding.address, toTokenAmount(1000000))).wait();
+   await (await usp.transfer(earn.address, toTokenAmount(10000000))).wait(); //transfer usp as reward to earn contract 
+   await (await sikka.transfer(bonding.address, toTokenAmount(1000000))).wait(); //transfer sikka to payback interest to borrower
 
    console.log("complete");
 
