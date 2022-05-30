@@ -69,6 +69,7 @@ contract Bonding is Ownable, ReentrancyGuard {
         require(_borrowRate > 0 && _borrowRate <= 1e18, "INVALID BORROW RATE");
         require(_liquidateRate > 0 && _liquidateRate <= 1e18, "INVALID LIQUIDATE RATE");
         require(_payBackRate > 0, "INVALID PAY BACK RATE");
+        require(_interestRate > 0, "INVALID INTEREST RATE");
 
         loanRate = _loanRate;
         liquidateRate = _liquidateRate;
@@ -192,13 +193,13 @@ contract Bonding is Ownable, ReentrancyGuard {
         uint priceAMATICB = IOracle(oracle).getPrice("AMATICB");
         uint priceUSP = IOracle(oracle).getPrice("USP");
 
-        uint valueLoan = user.amountLoan.mul(priceAMATICB).div(priceUSP);
-        uint valueBorrow = user.amountBorrow.add(user.amountInterest);
-        require(valueLoan.mul(loanRate).div(MAG).mul(borrowRate).div(MAG) <= valueBorrow, "CAN NOT LIQUIDATE NOW");
-
         uint amountBorrow = user.amountBorrow;
         uint amountLoan = user.amountLoan;
         uint amountInterest = user.amountInterest;
+
+        uint valueLoan = amountLoan.mul(priceAMATICB).div(priceUSP);
+        uint valueBorrow = amountBorrow.add(amountInterest);
+        require(valueLoan.mul(loanRate).div(MAG).mul(borrowRate).div(MAG) <= valueBorrow, "CAN NOT LIQUIDATE NOW");
 
         user.amountBorrow = 0;
         user.amountLoan = 0;
