@@ -172,18 +172,14 @@ contract Bonding is Ownable, ReentrancyGuard {
     }
 
     function withdraw(uint amountAMATICB) nonReentrant noPause update(msg.sender) external {
-        uint priceAMATICB = IOracle(oracle).getPrice("AMATICB");
-        uint priceUSP = IOracle(oracle).getPrice("USP");
-
         Info storage user = users[msg.sender];
-        (uint total, uint used) = calculateQuota(msg.sender);
-        uint lockedAmaticB = total.sub(used).mul(priceUSP).div(priceAMATICB);
-        require(user.amountLoan >= lockedAmaticB.add(amountAMATICB), "NO ENOUGH TOKEN TO WITHDRAW");
-
         totalLoan = totalLoan.sub(amountAMATICB);
         user.amountLoan = user.amountLoan.sub(amountAMATICB);
-        amaticb.safeTransfer(msg.sender, amountAMATICB);
 
+        (uint total, uint used) = calculateQuota(msg.sender);
+        require(total >= used, "NO ENOUGH TOKEN TO WITHDRAW ");
+
+        amaticb.safeTransfer(msg.sender, amountAMATICB);
         emit Withdraw(msg.sender, amountAMATICB);
     }
 
